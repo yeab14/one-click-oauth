@@ -7,8 +7,8 @@ Author: Yeabsira Dereje
 */
 
 // Define SubscribeStar and Patreon credentials
-$subscribestar_client_id = 'gnfAs4BMsnfcqX6-8i-DgTBfQ_xGBiuiWcCdgUEsSC4';
-$subscribestar_client_secret = 'dtqq5ulTrU8e6TcX5RKuxCeV_xrhPsGz6bEbWo03wT8';
+$subscribestar_client_id = 'v8Jli0gQupBmYkYYoAUATr3TLQjHxZyHO66npeir0mY';
+$subscribestar_client_secret = 'k-_qKnbfeYcJ-LzPcojxz5T7WbPbgis7f8y4085-w0A';
 $subscribestar_redirect_uri = 'http://localhost/mywordpress/?oauth_callback=subscribestar';
 $patreon_client_id = 'sBpOWAGt609aJOgedSwaP3yenNvXLWMqVXazfyzviUtrPx4chhXhyz1mAYRsAhSp';
 $patreon_client_secret = 'nJjjISDfnmmLJQgjtkFmYbfWpeYk9-rrH6l2VdxyhdOP-26wTcKZ-jTMChv';
@@ -41,7 +41,7 @@ function oauth_authenticate_user() {
             wp_redirect($auth_url);
             exit;
         } elseif ($provider == 'subscribestar') {
-            $auth_url = "https://www.subscribestar.com/oauth2/authorize?client_id={$subscribestar_client_id}&redirect_uri=" . urlencode($subscribestar_redirect_uri) . "&response_type=code&scope=subscriber.read+subscriber.payments.read+user.read+user.email.read";
+            $auth_url = "https://www.subscribestar.com/oauth2/authorize?client_id={$subscribestar_client_id}&redirect_uri=" . urlencode($subscribestar_redirect_uri) . "&response_type=code&scope=" . urlencode("content_provider_profile.read content_provider_profile.subscriptions.read content_provider_profile.payments.read content_provider_profile.payouts.read subscriber.read subscriber.payments.read user.read user.email.read user.shipping_address.read user.subscriptions.read user.payments.read");
             wp_redirect($auth_url);
             exit;
         }
@@ -82,37 +82,20 @@ function oauth_callback() {
                 }
             }
         } elseif ($provider == 'subscribestar' && $code) {
-            // Follow the SubscribeStar sample structure
-            $token_url = "https://www.subscribestar.com/oauth2/token";
-            $response = wp_remote_post($token_url, [
-                'body' => [
-                    'client_id' => $subscribestar_client_id,
-                    'client_secret' => $subscribestar_client_secret,
-                    'code' => $code,
-                    'grant_type' => 'authorization_code',
-                    'redirect_uri' => $subscribestar_redirect_uri,
-                ],
-                'headers' => [
-                    'Content-Type' => 'application/x-www-form-urlencoded',
-                ],
-            ]);
-
-            if (!is_wp_error($response)) {
-                $data = json_decode(wp_remote_retrieve_body($response), true);
-                if (isset($data['access_token'])) {
-                    update_user_meta(get_current_user_id(), 'oauth_access', true); // Mark user as authenticated
-                    update_user_meta(get_current_user_id(), 'subscribestar_access_token', $data['access_token']); // Save SubscribeStar access token
-                    
-                    // Make API call to get subscription status
-                    $subscription_data = send_subscribestar_api_request($data['access_token'], "{ subscriber { subscription { active } } }");
-                    
-                    if ($subscription_data && $subscription_data->subscriber->subscription->active) {
-                        wp_redirect(home_url()); // User is subscribed, redirect to content
-                    } else {
-                        wp_redirect(home_url('/subscription-error')); // Subscription failed or inactive
-                    }
-                    exit;
+            $access_token = request_subscribestar_token($code);
+            if ($access_token) {
+                update_user_meta(get_current_user_id(), 'oauth_access', true); // Mark user as authenticated
+                update_user_meta(get_current_user_id(), 'subscribestar_access_token', $access_token); // Save SubscribeStar access token
+                
+                // Make API call to get subscription status
+                $subscription_data = send_subscribestar_api_request($access_token, "{ subscriber { subscription { active } } }");
+                
+                if ($subscription_data && $subscription_data->subscriber->subscription->active) {
+                    wp_redirect(home_url()); // User is subscribed, redirect to content
+                } else {
+                    wp_redirect(home_url('/subscription-error')); // Subscription failed or inactive
                 }
+                exit;
             }
         }
     }
@@ -132,6 +115,33 @@ function send_subscribestar_api_request($access_token, $query) {
 
     if (!is_wp_error($response)) {
         return json_decode(wp_remote_retrieve_body($response));
+    }
+    return null;
+}
+
+// Function to request token for SubscribeStar using the received code
+function request_subscribestar_token($code) {
+    global $subscribestar_client_id, $subscribestar_client_secret, $subscribestar_redirect_uri;
+
+    $url = "https://www.subscribestar.com/oauth2/token";
+    $response = wp_remote_post($url, [
+        'body' => [
+            'client_id' => $subscribestar_client_id,
+            'client_secret' => $subscribestar_client_secret,
+            'code' => $code,
+            'grant_type' => 'authorization_code',
+            'redirect_uri' => $subscribestar_redirect_uri,
+        ],
+        'headers' => [
+            'Content-Type' => 'application/x-www-form-urlencoded',
+        ],
+    ]);
+
+    if (!is_wp_error($response)) {
+        $data = json_decode(wp_remote_retrieve_body($response), true);
+        if (isset($data['access_token'])) {
+            return $data['access_token'];
+        }
     }
     return null;
 }
@@ -156,3 +166,5 @@ function oauth_message() {
     }
 }
 add_action('wp_footer', 'oauth_message');
+
+
