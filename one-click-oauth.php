@@ -1,43 +1,47 @@
 <?php
 /*
-Plugin Name: One Click OAuth
-Description: A plugin to hide content and unlock it using Patreon and Subscribestar APIs.
-Version: 1.0
+Plugin Name: One Click OAuth Content Unlocker
+Description: A plugin that hides content and unlocks it using Patreon and SubscribeStar OAuth2 APIs. Users can log in with either platform to access hidden content.
+Version: 1.1
 Author: Yeabsira Dereje
 */
 
-// Function to hide content after <read more> tag
-function oauth_hide_content($content) {
-    // Check if the content contains the <!--more--> tag
-    if (strpos($content, '<!--more-->') !== false) {
-        // Split the content into two parts
-        list($before_more, $after_more) = explode('<!--more-->', $content);
+// Define SubscribeStar and Patreon credentials
+$subscribestar_client_id = 'gnfAs4BMsnfcqX6-8i-DgTBfQ_xGBiuiWcCdgUEsSC4';
+$subscribestar_client_secret = 'dtqq5ulTrU8e6TcX5RKuxCeV_xrhPsGz6bEbWo03wT8';
+$subscribestar_redirect_uri = 'http://localhost/mywordpress/?oauth_callback=subscribestar';
+$patreon_client_id = 'sBpOWAGt609aJOgedSwaP3yenNvXLWMqVXazfyzviUtrPx4chhXhyz1mAYRsAhSp';
+$patreon_client_secret = 'nJjjISDfnmmLJQgjtkFmYbfWpeYk9-rrH6l2VdxyhdOP-26wTcKZ-jTMChv';
+$patreon_redirect_uri = 'http://localhost/mywordpress/?oauth_callback=patreon';
 
-        // Here you can add logic to check if the user is authorized
-        // For now, we'll just show a locked message
-        return $before_more . '<p>This content is locked. Please log in to access it.</p>';
+// Function to hide content after the <read more> tag
+function oauth_hide_content($content) {
+    if (is_user_logged_in() && get_user_meta(get_current_user_id(), 'oauth_access', true)) {
+        return $content; // Show full content if user is authenticated via OAuth
     }
+
+    if (strpos($content, '<!--more-->') !== false) {
+        list($before_more, $after_more) = explode('<!--more-->', $content);
+        return $before_more . '<p>This content is locked. Please log in with Patreon or SubscribeStar to access it.</p>' . do_shortcode('[oauth_button]');
+    }
+
     return $content;
 }
 add_filter('the_content', 'oauth_hide_content');
 
-// Function to authenticate user with OAuth
+// Function to initiate OAuth login for Patreon and SubscribeStar
 function oauth_authenticate_user() {
+    global $subscribestar_client_id, $subscribestar_redirect_uri, $patreon_client_id, $patreon_redirect_uri;
+    
     if (isset($_GET['oauth_provider'])) {
-        $provider = $_GET['oauth_provider'];
-        
+        $provider = sanitize_text_field($_GET['oauth_provider']);
+
         if ($provider == 'patreon') {
-            // Redirect to Patreon OAuth endpoint
-            $client_id = 'sBpOWAGt609aJOgedSwaP3yenNvXLWMqVXazfyzviUtrPx4chhXhyz1mAYRsAhSp'; 
-            $redirect_url = 'http://localhost/mywordpress/?oauth_callback=patreon';
-            $auth_url = "https://www.patreon.com/oauth2/authorize?response_type=code&client_id={$client_id}&redirect_uri=" . urlencode($redirect_url);
+            $auth_url = "https://www.patreon.com/oauth2/authorize?response_type=code&client_id={$patreon_client_id}&redirect_uri=" . urlencode($patreon_redirect_uri);
             wp_redirect($auth_url);
             exit;
         } elseif ($provider == 'subscribestar') {
-            // Redirect to Subscribestar OAuth endpoint
-            $client_id = 'gnfAs4BMsnfcqX6-8i-DgTBfQ_xGBiuiWcCdgUEsSC4'; // Your Subscribestar Client ID
-            $redirect_url = 'http://localhost/mywordpress/?oauth_callback=subscribestar';
-            $auth_url = "https://www.subscribestar.com/api/oauth/authorize?response_type=code&client_id={$client_id}&redirect_uri=" . urlencode($redirect_url);
+            $auth_url = "https://www.subscribestar.com/oauth2/authorize?client_id={$subscribestar_client_id}&redirect_uri=" . urlencode($subscribestar_redirect_uri) . "&response_type=code&scope=subscriber.read+subscriber.payments.read+user.read+user.email.read";
             wp_redirect($auth_url);
             exit;
         }
@@ -45,74 +49,110 @@ function oauth_authenticate_user() {
 }
 add_action('init', 'oauth_authenticate_user');
 
-// Add a button to initiate OAuth
-function oauth_add_button() {
-    return '<a href="?oauth_provider=patreon" class="oauth-button">Unlock with Patreon</a> | <a href="?oauth_provider=subscribestar" class="oauth-button">Unlock with Subscribestar</a>';
-}
-add_shortcode('oauth_button', 'oauth_add_button');
-
-// Example callback function after successful OAuth
+// Function to handle OAuth callback for both Patreon and SubscribeStar
 function oauth_callback() {
+    global $subscribestar_client_id, $subscribestar_client_secret, $subscribestar_redirect_uri, $patreon_client_id, $patreon_client_secret, $patreon_redirect_uri;
+
     if (isset($_GET['oauth_callback'])) {
-        $provider = $_GET['oauth_callback'];
-        
-        if ($provider == 'patreon' && isset($_GET['code'])) {
-            $code = $_GET['code'];
+        $provider = sanitize_text_field($_GET['oauth_callback']);
+        $code = isset($_GET['code']) ? sanitize_text_field($_GET['code']) : '';
 
-            // Exchange the authorization code for an access token
-            $client_id = 'sBpOWAGt609aJOgedSwaP3yenNvXLWMqVXazfyzviUtrPx4chhXhyz1mAYRsAhSp';
-            $client_secret = 'weiBiJ8jhb6Ow5e0uhORDZxSLipqqrK1MQ5kOBMfNHwNLP6TOUlAIuoo9bnhh9FB'; // Your Patreon Client Secret
-            $redirect_uri = 'http://localhost/mywordpress/?oauth_callback=patreon';
-
+        if ($provider == 'patreon' && $code) {
             $token_url = "https://www.patreon.com/api/oauth2/token";
             $response = wp_remote_post($token_url, [
                 'body' => [
-                    'client_id' => $client_id,
-                    'client_secret' => $client_secret,
+                    'client_id' => $patreon_client_id,
+                    'client_secret' => $patreon_client_secret,
                     'code' => $code,
                     'grant_type' => 'authorization_code',
-                    'redirect_uri' => $redirect_uri,
-                ]
+                    'redirect_uri' => $patreon_redirect_uri,
+                ],
+                'headers' => [
+                    'Content-Type' => 'application/x-www-form-urlencoded',
+                ],
             ]);
 
-            // Handle the response and store the access token
             if (!is_wp_error($response)) {
                 $data = json_decode(wp_remote_retrieve_body($response), true);
-                $access_token = $data['access_token'];
-
-                // Store the access token (e.g., in user meta or session)
-                // For simplicity, we'll just echo it here
-                echo "Patreon Access Token: " . esc_html($access_token);
+                if (isset($data['access_token'])) {
+                    update_user_meta(get_current_user_id(), 'oauth_access', true); // Mark user as authenticated
+                    update_user_meta(get_current_user_id(), 'patreon_access_token', $data['access_token']); // Save Patreon access token
+                    wp_redirect(home_url()); // Redirect to homepage or content
+                    exit;
+                }
             }
-        } elseif ($provider == 'subscribestar' && isset($_GET['code'])) {
-            $code = $_GET['code'];
-
-            // Exchange the authorization code for an access token
-            $client_id = 'gnfAs4BMsnfcqX6-8i-DgTBfQ_xGBiuiWcCdgUEsSC4'; // Your Subscribestar Client ID
-            $client_secret = 'dtqq5ulTrU8e6TcX5RKuxCeV_xrhPsGz6bEbWo03wT8'; // Your Subscribestar Client Secret
-            $redirect_uri = 'http://localhost/mywordpress/?oauth_callback=subscribestar';
-
-            $token_url = "https://www.subscribestar.com/api/oauth/token"; // Adjust based on their API
+        } elseif ($provider == 'subscribestar' && $code) {
+            // Follow the SubscribeStar sample structure
+            $token_url = "https://www.subscribestar.com/oauth2/token";
             $response = wp_remote_post($token_url, [
                 'body' => [
-                    'client_id' => $client_id,
-                    'client_secret' => $client_secret,
+                    'client_id' => $subscribestar_client_id,
+                    'client_secret' => $subscribestar_client_secret,
                     'code' => $code,
                     'grant_type' => 'authorization_code',
-                    'redirect_uri' => $redirect_uri,
-                ]
+                    'redirect_uri' => $subscribestar_redirect_uri,
+                ],
+                'headers' => [
+                    'Content-Type' => 'application/x-www-form-urlencoded',
+                ],
             ]);
 
-            // Handle the response and store the access token
             if (!is_wp_error($response)) {
                 $data = json_decode(wp_remote_retrieve_body($response), true);
-                $access_token = $data['access_token'];
-
-                // Store the access token (e.g., in user meta or session)
-                // For simplicity, we'll just echo it here
-                echo "Subscribestar Access Token: " . esc_html($access_token);
+                if (isset($data['access_token'])) {
+                    update_user_meta(get_current_user_id(), 'oauth_access', true); // Mark user as authenticated
+                    update_user_meta(get_current_user_id(), 'subscribestar_access_token', $data['access_token']); // Save SubscribeStar access token
+                    
+                    // Make API call to get subscription status
+                    $subscription_data = send_subscribestar_api_request($data['access_token'], "{ subscriber { subscription { active } } }");
+                    
+                    if ($subscription_data && $subscription_data->subscriber->subscription->active) {
+                        wp_redirect(home_url()); // User is subscribed, redirect to content
+                    } else {
+                        wp_redirect(home_url('/subscription-error')); // Subscription failed or inactive
+                    }
+                    exit;
+                }
             }
         }
     }
 }
 add_action('init', 'oauth_callback');
+
+// Function to send API request to SubscribeStar
+function send_subscribestar_api_request($access_token, $query) {
+    $api_endpoint = "https://www.subscribestar.com/api/graphql/v1";
+    $response = wp_remote_post($api_endpoint, [
+        'body' => json_encode(['query' => $query]),
+        'headers' => [
+            'Authorization' => "Bearer {$access_token}",
+            'Content-Type' => 'application/json',
+        ],
+    ]);
+
+    if (!is_wp_error($response)) {
+        return json_decode(wp_remote_retrieve_body($response));
+    }
+    return null;
+}
+
+// Add shortcode to display OAuth login buttons
+function oauth_add_button() {
+    $output = '<a href="?oauth_provider=patreon" class="oauth-button" style="background-color:#FF424D;color:white;padding:10px;margin:10px;">Unlock with Patreon</a>';
+    $output .= '<a href="?oauth_provider=subscribestar" class="oauth-button" style="background-color:#FFD700;color:black;padding:10px;margin:10px;">Unlock with SubscribeStar</a>';
+    return $output;
+}
+add_shortcode('oauth_button', 'oauth_add_button');
+
+// Display message after login or error handling
+function oauth_message() {
+    if (isset($_GET['oauth_callback'])) {
+        $provider = sanitize_text_field($_GET['oauth_callback']);
+        if (isset($_GET['error'])) {
+            echo '<p style="color:red;">Error: ' . esc_html($_GET['error_description']) . '</p>';
+        } else {
+            echo '<p style="color:green;">Login successful with ' . ucfirst($provider) . '!</p>';
+        }
+    }
+}
+add_action('wp_footer', 'oauth_message');
