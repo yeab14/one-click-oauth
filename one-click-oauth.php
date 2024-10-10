@@ -70,46 +70,57 @@ function oauth_callback() {
         if ($provider == 'patreon' && $code) {
             $token = oauth_get_token('patreon', $code);
             if ($token) {
-               
                 $user_info = oauth_get_user_info('patreon', $token);
                 if ($user_info) {
                     $email = $user_info->data->attributes->email;
                     $nickname = $user_info->data->attributes->full_name;
-    
-                   
+
                     $user = get_user_by('email', $email);
                     if (!$user) {
-                        
                         $user_id = wp_create_user($nickname, wp_generate_password(), $email);
                         if (!is_wp_error($user_id)) {
-                           
                             wp_update_user(['ID' => $user_id, 'role' => 'subscriber']);
                         }
                     } else {
-                       
                         update_user_meta($user->ID, 'oauth_access', true);
                     }
                     update_user_meta($user->ID, 'patreon_access_token', $token);
-                  
+
                     $pledge_data = oauth_get_user_pledge('patreon', $token);
                     if ($pledge_data) {
-                        update_user_meta($user->ID, 'user_pledge', $pledge_data->included[0]->attributes->amount_cents / 100);
-                        wp_redirect(home_url());
+                        $pledge_amount = $pledge_data->included[0]->attributes->amount_cents / 100; // Store pledge amount in dollars
+                        update_user_meta($user->ID, 'user_pledge', $pledge_amount);
+                        
+                        // Logic for redirecting based on pledge amount
+                        if ($pledge_amount >= 10) {
+                            wp_redirect(home_url('/thank-you'));
+                        } else {
+                            wp_redirect(home_url('/thank-you-low-pledge'));
+                        }
+                        exit;
                     }
                 }
                 exit;
             }
-        }elseif ($provider == 'subscribestar' && $code) {
+        } elseif ($provider == 'subscribestar' && $code) {
             $access_token = oauth_get_token('subscribestar', $code);
             if ($access_token) {
                 update_user_meta(get_current_user_id(), 'oauth_access', true);
                 update_user_meta(get_current_user_id(), 'subscribestar_access_token', $access_token);
 
-                // Fetch user subscription status
+                
                 $subscription_data = oauth_get_user_subscription('subscribestar', $access_token);
                 if ($subscription_data) {
-                    update_user_meta(get_current_user_id(), 'user_pledge', $subscription_data->subscription_amount / 100); // Store pledge amount in dollars
-                    wp_redirect(home_url());
+                    $subscription_amount = $subscription_data->subscription_amount / 100; // Store pledge amount in dollars
+                    update_user_meta(get_current_user_id(), 'user_pledge', $subscription_amount);
+
+                    // Logic for redirecting based on pledge amount
+                    if ($subscription_amount >= 10) {
+                        wp_redirect(home_url('/thank-you'));
+                    } else {
+                        wp_redirect(home_url('/thank-you-low-pledge'));
+                    }
+                    exit;
                 } else {
                     wp_redirect(home_url('/subscription-error?error=no_subscription_data'));
                 }
@@ -118,6 +129,7 @@ function oauth_callback() {
         }
     }
 }
+
 add_action('init', 'oauth_callback');
 
 function oauth_get_token($provider, $code) {
@@ -183,7 +195,7 @@ if (!wp_next_scheduled('oauth_check_user_pledges_hook')) {
 
 function oauth_get_user_subscription($provider, $token) {
     if ($provider == 'subscribestar') {
-        $url = "https://www.subscribestar.com/api/v1/subscription"; // Example API endpoint; update as needed
+        $url = "https://www.subscribestar.com/api/v1/subscription"; // Ensure this is the correct endpoint
         $response = wp_remote_get($url, [
             'headers' => [
                 'Authorization' => "Bearer {$token}",
@@ -197,6 +209,7 @@ function oauth_get_user_subscription($provider, $token) {
     }
     return null;
 }
+
 
 function oauth_add_button() {
     $output = '<style>
