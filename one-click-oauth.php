@@ -46,6 +46,30 @@ function oauth_add_button() {
 }
 add_shortcode('oauth_button', 'oauth_add_button');
 
+function oauth_pledge_button() {
+    $output = '<style>
+        .oauth-button {
+            display: inline-block;
+            background-color: #FF424D; /* Default color for Patreon button */
+            color: white;
+            padding: 10px 20px;
+            margin: 10px;
+            text-decoration: none;
+            border-radius: 5px;
+            transition: background-color 0.3s;
+        }
+        .oauth-button:hover {
+            background-color: #FF2E3A; /* Darker shade for hover */
+        }
+    </style>';
+    
+    $output .= '<a href="' . esc_url(get_option('patreon_checkout_url')) . '" class="oauth-button">Pledge with Patreon</a>';
+    $output .= '<a href="' . esc_url(add_query_arg('oauth_provider', 'subscribestar', home_url())) . '" class="oauth-button" style="background-color: #00BFFF;">Pledge with SubscribeStar</a>'; // Different color for SubscribeStar button
+    
+    return $output;
+}
+add_shortcode('oauth_pledge_button', 'oauth_pledge_button');
+
 function oauth_hide_content($content) {
     if (is_user_logged_in()) {
         $user_pledge = get_user_meta(get_current_user_id(), 'user_pledge', true);
@@ -60,8 +84,7 @@ function oauth_hide_content($content) {
                 <p><?php echo esc_html(get_option('lock_message')); ?></p>
                 <p>Your current pledge amount is $<?php echo esc_html($user_pledge); ?>, which is less than the required $<?php echo esc_html($locked_amount); ?> to access this content.</p>
                 <p>Would you like to:</p>
-                <a href="<?php echo esc_url(get_option('patreon_checkout_url')); ?>" class="oauth-button">Pledge using Patreon</a>
-                <a href="<?php echo esc_url(add_query_arg('oauth_provider', 'subscribestar', home_url())); ?>" class="oauth-button" style="background-color: #00BFFF;">Pledge using SubscribeStar</a>
+                <?php echo do_shortcode('[oauth_pledge_button]'); // Use the shortcode to display pledge buttons ?>
             </div>
             <?php
             return ob_get_clean(); // Return the buffered content
